@@ -7,13 +7,13 @@ export class MultiCommand {
         readonly description: string | undefined,
         readonly interval: number | undefined,
         readonly sequence: Array<Command>,
-        readonly languages: Array<string> | undefined
+        readonly languages: Array<string> | undefined,
     ) {}
 
     public async execute() {
         for (let command of this.sequence) {
             await command.execute();
-            await delay(this.interval || 0);
+            await delay(command.delay || this.interval || 0);
         }
     }
 }

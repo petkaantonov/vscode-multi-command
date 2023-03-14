@@ -2,11 +2,11 @@
     "name": "multi-command",
     "displayName": "multi-command",
     "description": "Invoke multiple commands as one command.",
-    "version": "1.6.0",
-    "publisher": "ryuta46",
+    "version": "9.9.9",
+    "publisher": "petka",
     "repository": {
         "type": "git",
-        "url": "https://github.com/ryuta46/vscode-multi-command.git"
+        "url": "https://github.com/petkaantonov/vscode-multi-command.git"
     },
     "engines": {
         "vscode": "^1.10.0"

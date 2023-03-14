@@ -26,6 +26,7 @@ interface ComplexCommand {
     command: string;
     args: object;
     repeat: number;
+    delay: number | undefined
     onSuccess: CommandSequence | undefined;
     onFail: CommandSequence | undefined;
     variableSubstitution: boolean;
@@ -49,6 +50,7 @@ function createMultiCommand(
         let args: object | undefined;
         let repeat: number = 1;
         let variableSubstitution: boolean;
+        let delay: number | undefined;
         let onSuccess: Array<Command> | undefined;
         let onFail: Array<Command> | undefined;
 
@@ -63,6 +65,7 @@ function createMultiCommand(
             }
             variableSubstitution = false;
         } else {
+            delay = command.delay ? parseInt((command as any).delay, 10) : undefined;
             exe = command.command;
             args = command.args;
             repeat = command.repeat ?? 1;
@@ -70,7 +73,7 @@ function createMultiCommand(
             onSuccess = command.onSuccess?.map((c) => createCommand(c));
             onFail = command.onFail?.map((c) => createCommand(c));
         }
-        return new Command(exe, args, repeat, onSuccess, onFail, variableSubstitution);
+        return new Command(exe, args, repeat, onSuccess, onFail, variableSubstitution, delay);
     }
 
     const sequence = settings.sequence.map((command) => {

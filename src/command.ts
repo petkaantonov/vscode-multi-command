@@ -9,7 +9,8 @@ export class Command {
         private readonly repeat: number,
         private readonly onSuccess: Array<Command> | undefined,
         private readonly onFail: Array<Command> | undefined,
-        private readonly variableSubstitution: boolean
+        private readonly variableSubstitution: boolean,
+        readonly delay: number | undefined
     ) {}
 
     public async execute() {
