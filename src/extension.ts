@@ -26,10 +26,19 @@ interface ComplexCommand {
     command: string;
     args: object;
     repeat: number;
-    delay: number | undefined
+    delayBefore: number | undefined
+    delayAfter: number | undefined
     onSuccess: CommandSequence | undefined;
     onFail: CommandSequence | undefined;
     variableSubstitution: boolean;
+    textSlotRegex: string | undefined
+    captureTextSlotRegex: string | undefined
+    skipIfTextSlotEmpty: boolean | undefined
+    skipIfLastExecuted: number | undefined
+    saveTextSlot: number | undefined
+    saveCursorSlot: number | undefined
+    reveal: boolean | undefined
+    escapeTextSlot: boolean | undefined
 }
 
 function implementsCommandMap(arg: any): arg is CommandSettings {
@@ -38,7 +47,8 @@ function implementsCommandMap(arg: any): arg is CommandSettings {
 
 function createMultiCommand(
     id: string,
-    settings: CommandSettings
+    settings: CommandSettings,
+    context: any
 ): MultiCommand {
     const label = settings.label;
     const description = settings.description;
@@ -50,9 +60,18 @@ function createMultiCommand(
         let args: object | undefined;
         let repeat: number = 1;
         let variableSubstitution: boolean;
-        let delay: number | undefined;
+        let textSlotRegex: RegExp | undefined
+        let delayBefore: number | undefined;
+        let delayAfter: number | undefined;
         let onSuccess: Array<Command> | undefined;
         let onFail: Array<Command> | undefined;
+        let skipIfLastExecuted: number | undefined;
+        let saveTextSlot: number | undefined;
+        let skipIfTextSlotEmpty = false;
+        let escapeTextSlot = false;
+        let saveCursorSlot: number | undefined;
+        let reveal = false
+        let captureTextSlotRegex: RegExp | undefined
 
         if (typeof command === "string") {
             let conditionedCommands = command.split(" || ")
@@ -65,7 +84,16 @@ function createMultiCommand(
             }
             variableSubstitution = false;
         } else {
-            delay = command.delay ? parseInt((command as any).delay, 10) : undefined;
+            reveal = !!command.reveal
+            captureTextSlotRegex = command.captureTextSlotRegex ? new RegExp(command.captureTextSlotRegex) : undefined
+            saveCursorSlot = command.saveCursorSlot
+            escapeTextSlot = !!command.escapeTextSlot 
+            skipIfLastExecuted = command.skipIfLastExecuted ?? undefined
+            saveTextSlot = command.saveTextSlot ?? undefined
+            textSlotRegex = command.textSlotRegex ? new RegExp(command.textSlotRegex, "g") : undefined
+            skipIfTextSlotEmpty = !!command.skipIfTextSlotEmpty
+            delayBefore = command.delayBefore ? parseInt((command as any).delayBefore, 10) : undefined;
+            delayAfter = command.delayAfter ? parseInt((command as any).delayAfter, 10) : undefined;
             exe = command.command;
             args = command.args;
             repeat = command.repeat ?? 1;
@@ -73,7 +101,7 @@ function createMultiCommand(
             onSuccess = command.onSuccess?.map((c) => createCommand(c));
             onFail = command.onFail?.map((c) => createCommand(c));
         }
-        return new Command(exe, args, repeat, onSuccess, onFail, variableSubstitution, delay);
+        return new Command({reveal, saveCursorSlot, captureTextSlotRegex, escapeTextSlot, skipIfLastExecuted, saveTextSlot, exe, args, repeat, onSuccess, onFail, variableSubstitution, delayBefore, delayAfter, textSlotRegex, skipIfTextSlotEmpty: skipIfTextSlotEmpty }, context);
     }
 
     const sequence = settings.sequence.map((command) => {
@@ -85,7 +113,7 @@ function createMultiCommand(
 
 let multiCommands: Array<MultiCommand>;
 
-function refreshUserCommands(context: vscode.ExtensionContext) {
+function refreshUserCommands(context: vscode.ExtensionContext, varContext: any) {
     let configuration = vscode.workspace.getConfiguration("multiCommand");
 
     let commands = new Map<string, CommandSettings>();
@@ -116,12 +144,12 @@ function refreshUserCommands(context: vscode.ExtensionContext) {
     multiCommands = [];
 
     commands.forEach((value: CommandSettings, key: string) => {
-        const multiCommand = createMultiCommand(key, value);
+        const multiCommand = createMultiCommand(key, value, varContext);
         multiCommands.push(multiCommand);
 
         context.subscriptions.push(
             vscode.commands.registerCommand(key, async () => {
-                await multiCommand.execute();
+                await multiCommand.execute(varContext);
             })
         );
     });
@@ -130,23 +158,25 @@ function refreshUserCommands(context: vscode.ExtensionContext) {
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-    refreshUserCommands(context);
+    const varContext: any = {}
+    refreshUserCommands(context, varContext);
 
     vscode.workspace.onDidChangeConfiguration(() => {
-        refreshUserCommands(context);
+        refreshUserCommands(context, varContext);
     });
 
     vscode.commands.registerCommand(
         "extension.multiCommand.execute",
         async (args = {}) => {
+            varContext.wasDirty = vscode.window.activeTextEditor?.document.isDirty
             try {
                 if (args.command) {
                     await vscode.commands.executeCommand(args.command);
                 } else if (args.sequence) {
-                    const multiCommand = createMultiCommand("", args);
-                    await multiCommand.execute();
+                    const multiCommand = createMultiCommand("", args, varContext);
+                    await multiCommand.execute(varContext);
                 } else {
-                    await pickMultiCommand();
+                    await pickMultiCommand(varContext);
                 }
             } catch (e) {
                 vscode.window.showErrorMessage(`${(e as Error).message}`);
@@ -156,14 +186,14 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // this method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() { }
 
-export async function pickMultiCommand() {
+export async function pickMultiCommand(varContext: any) {
     let languageId = vscode.window.activeTextEditor?.document.languageId;
 
     const picks = multiCommands.filter((multiCommand) => {
         if (languageId) {
-            return (multiCommand.languages?.indexOf(languageId) ?? 1)  >= 0;
+            return (multiCommand.languages?.indexOf(languageId) ?? 1) >= 0;
         } else {
             return true;
         }
@@ -182,5 +212,5 @@ export async function pickMultiCommand() {
     if (!item) {
         return;
     }
-    await item.multiCommand.execute();
+    await item.multiCommand.execute(varContext);
 }

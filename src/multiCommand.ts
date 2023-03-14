@@ -10,11 +10,15 @@ export class MultiCommand {
         readonly languages: Array<string> | undefined,
     ) {}
 
-    public async execute() {
+    public async execute(varContext: any) {
         for (let command of this.sequence) {
+            if (command.delayBefore) {
+                await delay(command.delayBefore)
+            }
             await command.execute();
-            await delay(command.delay || this.interval || 0);
+            await delay(command.delayAfter || this.interval || 0);
         }
+        varContext.lastExecuted = Date.now()
     }
 }
 
