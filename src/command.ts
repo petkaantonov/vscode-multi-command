@@ -75,12 +75,16 @@ export class Command {
                 throw new Error("no editor")
             }
             const document = editor.document
-            
+
             if (cmd === "#goto" && args) {
                 let line: number, character: number
 
                 if (args.slot) {
-                    void ({ line, character } = this.context[`savedCursorSlot${args.slot}`]) || { line: 0, character: 0 }
+                    const selections = (this.context[`savedCursorSlot${args.slot}`] || []).map((v: { line: number, character: number }) => new vscode.Selection(new vscode.Position(v.line, v.character), new vscode.Position(v.line, v.character)))
+                    if (args.reveal && selections.length > 0) {
+                        editor.revealRange(selections[0], vscode.TextEditorRevealType.InCenterIfOutsideViewport)
+                    }
+                    editor.selections = selections
                 } else {
                     const num = parseInt(args.line, 10) - 1
                     let end = args.end ? document.lineAt(num).range.end.character : 0
@@ -88,16 +92,16 @@ export class Command {
                     end = args.match && end >= 0 && args.afterMatch ? end + args.match.length : end
                     line = num
                     character = end
+                    let target = new vscode.Position(line, character)
+                    target = document.validatePosition(target);
+                    if (args.reveal) {
+                        editor.revealRange(new vscode.Range(target, target), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+                    }
+                    editor.selection = new vscode.Selection(target, target);
                 }
-                let target = new vscode.Position(line, character)
-                target = document.validatePosition(target);
-                if (args.reveal) {
-                    editor.revealRange(new vscode.Range(target, target), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-                }
-                editor.selection = new vscode.Selection(target, target);
             } else if (cmd === "#saveLinesTextSlot" && args.slot !== undefined) {
                 let start = parseInt(args.from, 10) - 1
-                let end =  parseInt(args.to || 0, 10) - 1
+                let end = parseInt(args.to || 0, 10) - 1
                 if (args.relativeAdd && +args.relativeAdd) {
                     end = start + args.relativeAdd
                 }
@@ -115,21 +119,63 @@ export class Command {
                 this.context[`savedSlot${args.slot}`] = text.join("\n")
             } else if (cmd === "#insert" && args.text !== undefined) {
                 await editor.edit(eb => {
-                    editor.selections.forEach(sel => {
-                        const range = sel.isEmpty ? document.getWordRangeAtPosition(sel.start) || sel : sel;
+                    if (args.atLine) {
+                        const pos = document.validatePosition(new vscode.Position(parseInt(args.atLine, 10) - 1, 0))
+                        const range = new vscode.Range(pos, pos)
                         eb.replace(range, args.text)
-                    })
+                    } else {
+                        editor.selections.forEach(sel => {
+                            const range = sel.isEmpty ? document.getWordRangeAtPosition(sel.start) || sel : sel;
+                            eb.replace(range, args.text)
+                        })
+                    }
                 })
-            } else if (cmd === "#selectLines") {
+            } else if (cmd === "#selectLines" || cmd === "#emptyLines") {
                 const count = (args.count && parseInt(args.count, 10)) || (args.to - args.from)
-                const endLine = editor.selection.active.line
-                const endChar = editor.document.lineAt(endLine).range.end.character
-                const endPos = document.validatePosition(new vscode.Position(endLine, endChar))
+                const newSelections: vscode.Selection[] = []
+                const callbacks: (() => Promise<boolean>)[] = []
+                editor.selections.forEach(selection => {
+                    const endLine = selection.active.line
+                    const endChar = editor.document.lineAt(endLine).range.end.character
+                    const endPos = document.validatePosition(new vscode.Position(endLine, endChar))
 
-                const startLine = endLine - count
-                const startPos = document.validatePosition(new vscode.Position(startLine, 0))
+                    const startLine = endLine - count
+                    const startPos = document.validatePosition(new vscode.Position(startLine, 0))
 
-                editor.selection = new vscode.Selection(startPos, endPos);
+                    if (cmd === "#selectLines") {
+                        newSelections.push(new vscode.Selection(startPos, endPos));
+                    } else {
+                        callbacks.push(async () =>
+                            editor.edit(eb => {
+                                for (let i = startLine; i <= endLine; ++i) {
+                                    if (args.keepWhiteSpace) {
+                                        const line = editor.document.lineAt(i)
+                                        const range = new vscode.Range(i, line.firstNonWhitespaceCharacterIndex, i, line.range.end.character)
+                                        eb.delete(range)
+                                    } else {
+                                        eb.delete(editor.document.lineAt(i).range)
+                                    }
+                                }
+                            })
+                        )
+                    }
+                })
+                if (newSelections.length > 0) {
+                    editor.selections = newSelections
+                }
+                if (callbacks.length > 0) {
+                    for (const cb of callbacks) {
+                        await cb()
+                    }
+                }
+            } else if (cmd === "#emptyLinesAbsolute") {
+                const from = parseInt(args.from, 10) - 1
+                const to = parseInt(args.to, 10) - 1
+                await editor.edit(eb => {
+                    for (let i = from; i <= to; ++i) {
+                        eb.delete(editor.document.lineAt(i).range)
+                    }
+                })
             }
         } else {
             await vscode.commands.executeCommand(cmd, args)
@@ -165,16 +211,13 @@ export class Command {
             const editor = vscode.window.activeTextEditor!
             if (this.saveTextSlot !== undefined) {
                 this.context[`savedSlot${this.saveTextSlot}`] = editor.document.getText(
-                    new vscode.Range(editor.selection.start,
-                        editor.selection.end)
+                    new vscode.Range(editor.selections[0].start,
+                        editor.selections[0].end)
                 )
 
             }
             if (this.saveCursorSlot) {
-                this.context[`savedCursorSlot${this.saveCursorSlot}`] = {
-                    line: editor.selection.active.line,
-                    character: editor.selection.active.character
-                }
+                this.context[`savedCursorSlot${this.saveCursorSlot}`] = editor.selections.map(v => ({ line: v.active.line, character: v.active.character }))
             }
             if (this.onSuccess) {
                 for (let command of this.onSuccess) {

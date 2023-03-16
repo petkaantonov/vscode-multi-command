@@ -28,12 +28,40 @@
                 "command": "extension.multiCommand.execute",
                 "title": "Execute multi command",
                 "category": "Multi command"
+            },
+            {
+                "command": "extension.multiCommand.toggleLineNumbers",
+                "title": "Toggle line numbers",
+                "category": "Multi command"
+            },
+            {
+                "command": "extension.multiCommand.pasteInsertRegister",
+                "title": "Paste insert register",
+                "category": "Multi command"
             }
         ],
         "configuration": {
             "type": "object",
             "title": "multi-command",
             "properties": {
+                "multiCommand.lineNumberStyle": {
+                    "type": "object"
+                },
+                "multiCommand.willBeJumpingRegex": {
+                    "type": "string"
+                },
+                "multiCommand.decoratedTokens": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "multiCommand.decoratedTokenStyles": {
+                    "type": "object",
+                    "items": {
+                        "type": "object"
+                    }
+                },
                 "multiCommand.commands": {
                     "type": [
                         "array",
@@ -84,7 +112,6 @@
     },
     "dependencies": {
         "@types/vscode": "^1.76.0",
-        "tsc": "^2.0.4",
         "vscode-variables": "^0.1.3"
     }
 }
