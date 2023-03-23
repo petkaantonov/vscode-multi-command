@@ -29,7 +29,11 @@
                 "title": "Undo cursor",
                 "category": "Multi command"
             },
-
+            {
+                "command": "extension.multiCommand.execExpressionCommand",
+                "title": "Execute typed expression command",
+                "category": "Multi command"
+            },
             {
                 "command": "extension.multiCommand.justCursorRedo",
                 "title": "Redo cursor",

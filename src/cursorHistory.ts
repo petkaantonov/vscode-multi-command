@@ -42,7 +42,7 @@ export function initializeCursorHistory() {
             if (vscode.window.activeTextEditor!.selection.isEqual(sel)) {
                 redo(fileName)
             }
-            
+
         }
     }
     function save(fileName: string) {
@@ -57,7 +57,10 @@ export function initializeCursorHistory() {
             bm = undoStack.shift()!
         }
         undoStack.push(bm)
-        data.redoStack = []
+        if (data.redoStack.length > 0) {
+            available.push(...data.redoStack)
+            data.redoStack.splice(0, data.redoStack.length)
+        }
         vscode.commands.executeCommand("numberedBookmarks.toggleBookmark" + bm)
     }
     const fileMap: Record<string, { lastEdited: number, available: number[], undoStack: number[], redoStack: number[], lastUpdate: number, previousSelection?: vscode.Selection }> = {}

@@ -31,7 +31,7 @@ type Mode =
 const r =
     /(?:\\\/|>=|<=|=>|\\`|\\"|\\'|\\\\|\/\/|\/\*|\*\/|\$\{|\n|[(){}<>'"`\/\[\]])/g
 
-class BracketMatcher {
+export class BracketMatcher {
     private b: Brackets[]
     constructor(b: Brackets[], private editor: vscode.TextEditor) {
         this.b = b.sort((a, b) => a.start - b.start)
