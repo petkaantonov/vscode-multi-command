@@ -25,6 +25,22 @@
     "contributes": {
         "commands": [
             {
+                "command": "extension.multiCommand.justCursorUndo",
+                "title": "Undo cursor",
+                "category": "Multi command"
+            },
+
+            {
+                "command": "extension.multiCommand.justCursorRedo",
+                "title": "Redo cursor",
+                "category": "Multi command"
+            },
+            {
+                "command": "extension.multiCommand.replaceConstants",
+                "title": "Replace constants",
+                "category": "Multi command"
+            },
+            {
                 "command": "extension.multiCommand.execute",
                 "title": "Execute multi command",
                 "category": "Multi command"
@@ -37,6 +53,21 @@
             {
                 "command": "extension.multiCommand.pasteInsertRegister",
                 "title": "Paste insert register",
+                "category": "Multi command"
+            },
+            {
+                "command": "extension.multiCommand.pasteSelectRegister",
+                "title": "Paste select register",
+                "category": "Multi command"
+            },
+            {
+                "command": "extension.multiCommand.pasteDeleteRegister",
+                "title": "Paste delete register",
+                "category": "Multi command"
+            },
+            {
+                "command": "extension.multiCommand.executePrevious",
+                "title": "Execute previous command",
                 "category": "Multi command"
             }
         ],

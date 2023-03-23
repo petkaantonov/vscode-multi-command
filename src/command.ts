@@ -24,6 +24,55 @@ interface Opts {
     saveCursorSlot: number | undefined
 }
 
+export function trimSelection(sel: vscode.Selection, editor: vscode.TextEditor): vscode.Selection {
+    const notWs = /\S/
+
+    const [start, end] = sel.active.compareTo(sel.anchor) >= 0 ? [sel.anchor, sel.active] : [sel.active, sel.anchor]
+    let startLine = -1
+    let startCharacter = -1
+    let endLine = -1
+    let endCharacter = -1
+    for (let i = start.line; i <= end.line; ++i) {
+        const line = editor.document.lineAt(i)
+        const sliceStart = i === start.line ? start.character : 0
+        const sliceEnd = i === end.line ? end.character : undefined
+        const text = line.text.slice(sliceStart, sliceEnd)
+        const indexOffset = i === start.line ? start.character : 0
+        if (notWs.test(text)) {
+            startLine = i
+            startCharacter = text.match(notWs)!.index! + indexOffset
+            break
+        }
+    }
+    for (let j = end.line; j >= start.line; --j) {
+        const line = editor.document.lineAt(j)
+        const sliceStart = j === start.line ? start.character : 0
+        const sliceEnd = j === end.line ? end.character : undefined
+        const text = line.text.slice(sliceStart, sliceEnd)
+        const indexOffset = j === start.line ? start.character : 0
+        if (notWs.test(text)) {
+            endLine = j
+            const match = text.match(/\s*$/)
+            if (!match) {
+                endCharacter = line.range.end.character
+            } else {
+                endCharacter = match.index! + indexOffset
+            }
+            break
+        }
+    }
+    if (startLine !== -1 && endLine !== -1) {
+        if (sel.active.compareTo(sel.anchor) >= 0) {
+            return new vscode.Selection(startLine, startCharacter, endLine, endCharacter)
+        } else {
+            return new vscode.Selection(endLine, endCharacter, startLine, startCharacter)
+        }
+    } else {
+        return sel
+    }
+
+}
+
 export class Command {
 
     private captureTextSlotRegex: RegExp | undefined
@@ -65,7 +114,6 @@ export class Command {
     }
 
     private async exec(cmd: string, args?: any) {
-        console.log("exec", cmd, args)
         if (cmd === "workbench.action.files.revert" && this.context.wasDirty) {
             return
         }
@@ -112,10 +160,18 @@ export class Command {
                 if (end < start) {
                     end = start
                 }
-                do {
-                    text.push(document.lineAt(start).text)
+
+                if (args.noLeadingWhitespace) {
+                    text.push(document.lineAt(start).text.trimStart())
                     start++
-                } while (start <= end)
+                }
+
+                if (start <= end) {
+                    do {
+                        text.push(document.lineAt(start).text)
+                        start++
+                    } while (start <= end)
+                }
                 this.context[`savedSlot${args.slot}`] = text.join("\n")
             } else if (cmd === "#insert" && args.text !== undefined) {
                 await editor.edit(eb => {
@@ -140,7 +196,8 @@ export class Command {
                     const endPos = document.validatePosition(new vscode.Position(endLine, endChar))
 
                     const startLine = endLine - count
-                    const startPos = document.validatePosition(new vscode.Position(startLine, 0))
+                    const startChar = args.noLeadingWhitespace ? editor.document.lineAt(startLine).firstNonWhitespaceCharacterIndex : 0
+                    const startPos = document.validatePosition(new vscode.Position(startLine, startChar))
 
                     if (cmd === "#selectLines") {
                         newSelections.push(new vscode.Selection(startPos, endPos));
@@ -169,15 +226,68 @@ export class Command {
                     }
                 }
             } else if (cmd === "#emptyLinesAbsolute") {
-                const from = parseInt(args.from, 10) - 1
-                const to = parseInt(args.to, 10) - 1
+                let start = parseInt(args.from, 10) - 1
+                let end = parseInt(args.to || 0, 10) - 1
+                if (args.relativeAdd && +args.relativeAdd) {
+                    end = start + args.relativeAdd
+                }
+                if (!args.to && !args.relativeAdd) {
+                    end = start
+                }
+                if (end < start) {
+                    end = start
+                }
+
                 await editor.edit(eb => {
-                    for (let i = from; i <= to; ++i) {
+                    for (let i = start; i <= end; ++i) {
                         eb.delete(editor.document.lineAt(i).range)
                     }
                 })
+            } else if (cmd === "#saveSelectSlot" || cmd === "#saveDeleteSlot") {
+                const text = editor.selections.map(v => {
+                    return editor.document.getText(v)
+                }).join("\n")
+                if (cmd === "#saveSelectSlot") {
+                    this.context.saveSelectSlot(text)
+                } else {
+                    this.context.saveDeleteSlot(text)
+                }
+            } else if (cmd === "#trimSelection") {
+                const newSelections = editor.selections.map(v => trimSelection(v, editor))
+                const text = newSelections.map(v => {
+                    return editor.document.getText(v)
+                }).join("\n")
+                this.context.saveSelectSlot(text)
+                editor.selections = newSelections
+            } else if (cmd === "#deleteLeft") {
+                const rangesToDelete = editor.selections.map(sel => {
+                    const [start, end] = sel.active.compareTo(sel.anchor) >= 0 ? [sel.anchor, sel.active] : [sel.active, sel.anchor]
+                    const line = editor.document.lineAt(start.line)
+                    return new vscode.Range(start.line, line.firstNonWhitespaceCharacterIndex, end.line, end.character)
+                })
+
+                const text = rangesToDelete.map(v => editor.document.getText(v)).join("\n")
+                this.context.saveDeleteSlot(text)
+                await editor.edit(eb => {
+                    rangesToDelete.forEach(r => eb.delete(r))
+                })
+            } else if (cmd === "#deleteRigth") {
+                const rangesToDelete = editor.selections.map(sel => {
+                    const [start, end] = sel.active.compareTo(sel.anchor) >= 0 ? [sel.anchor, sel.active] : [sel.active, sel.anchor]
+                    const line = editor.document.lineAt(start.line)
+                    return new vscode.Range(start.line, start.character, end.line, line.range.end.character)
+                })
+
+                const text = rangesToDelete.map(v => editor.document.getText(v)).join("\n")
+                this.context.saveDeleteSlot(text)
+                await editor.edit(eb => {
+                    rangesToDelete.forEach(r => eb.delete(r))
+                })
             }
         } else {
+            if (!cmd.includes("executePrevious")) {
+                this.context.previousCommand = { cmd, args }
+            }
             await vscode.commands.executeCommand(cmd, args)
         }
     }
@@ -188,6 +298,7 @@ export class Command {
         }
 
         try {
+
             if (this.args) {
                 let args;
                 if (this.variableSubstitution) {
@@ -200,12 +311,13 @@ export class Command {
                 if (ref.skip) {
                     return
                 }
+
                 for (let i = 0; i < this.repeat; i++) {
-                    await this.exec(this.exe, args)
+                    (await this.exec(this.exe, args)) as any
                 }
             } else {
                 for (let i = 0; i < this.repeat; i++) {
-                    await this.exec(this.exe)
+                    (await this.exec(this.exe)) as any
                 }
             }
             const editor = vscode.window.activeTextEditor!
@@ -233,6 +345,7 @@ export class Command {
                     await command.execute();
                 }
             } else {
+                console.log((e as any).stack)
                 throw (e);
             }
         }
