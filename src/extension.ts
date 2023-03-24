@@ -3,7 +3,7 @@
 
 
 import * as vscode from "vscode";
-import { parseBrackets } from "./brackets";
+import { initializeBrackets, parseBrackets } from "./brackets";
 import { Command, trimSelection } from "./command";
 import { initializeCursorHistory } from "./cursorHistory";
 import { MultiCommand } from "./multiCommand";
@@ -193,6 +193,7 @@ export function activate(context: vscode.ExtensionContext) {
     refreshUserCommands(context, varContext);
     initializeCursorHistory()
     initializeTypedExpressionCommands()
+    initializeBrackets()
 
     let registration: ReturnType<typeof vscode.window.onDidChangeTextEditorVisibleRanges> | undefined = undefined
     let decorations: { dec: ReturnType<typeof vscode.window.createTextEditorDecorationType>, line: number }[] = []

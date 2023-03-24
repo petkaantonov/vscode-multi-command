@@ -17,6 +17,7 @@ interface Brackets {
     char: "[" | "{" | "<" | "(" | "'" | '"' | "`" | "//" | "/*" | "${" | "/"
     start: number
     end?: number
+    closeTagName?: string
 }
 type Mode =
     | "singleLineComment"
@@ -29,10 +30,11 @@ type Mode =
     | "tag"
 
 const r =
-    /(?:\\\/|>=|<=|=>|\\`|\\"|\\'|\\\\|\/\/|\/\*|\*\/|\$\{|\n|[(){}<>'"`\/\[\]])/g
+    /(?:\/=|\\\/|>=|<=|=>|<\/|\/>|\\`|\\"|\\'|\\\\|\/\/|\/\*|\*\/|\$\{|\n|[(){}<>'"`\/\[\]])/g
 
 export class BracketMatcher {
     private b: Brackets[]
+    private bb: Brackets[] | undefined
     constructor(b: Brackets[], private editor: vscode.TextEditor) {
         this.b = b.sort((a, b) => a.start - b.start)
     }
@@ -52,7 +54,10 @@ export class BracketMatcher {
 
     getPrevPeerBracket(cursor: vscode.Position, chars: Brackets["char"][]): Brackets | undefined {
         const bracket = this.getBracketEnclosingCursor(cursor, chars, true)
-        const b = this.b.slice().sort((a, b) => a.end! - b.end!)
+        if (!this.bb) {
+            this.bb = this.b.slice().sort((a, b) => a.end! - b.end!)
+        }
+        const b = this.bb
         if (!bracket) {
             for (let i = b.length - 1; i >= 0; --i) {
                 const br = b[i]
@@ -74,6 +79,35 @@ export class BracketMatcher {
             if (br.char === bracket.char && br.start > bracket.start && this.editor.document.positionAt(br.start).compareTo(cursor) < 0) {
                 return br
             }
+        }
+        return undefined
+    }
+
+    getTagEnclosingCursor(cursor: vscode.Position, tagName?: string): [Brackets, Brackets] | undefined {
+        const offset = this.editor.document.offsetAt(cursor)
+        const closingTag = this.b.find(b => b.start >= offset && b.closeTagName !== undefined && (tagName !== undefined ? b.closeTagName === tagName : true))
+        if (!closingTag) {
+            return undefined
+        }
+        if (!this.bb) {
+            this.bb = this.b.slice().sort((a, b) => a.end! - b.end!)
+        }
+        const b = this.bb
+        let openingTag: Brackets | undefined
+        for (let i = b.length - 1; i >= 0; --i) {
+            const br = b[i]
+            if (br.end! <= offset && br.char === "<") {
+                const start = this.editor.document.positionAt(br.start + 1)
+                const end = this.editor.document.positionAt(br.end!)
+                const text = this.editor.document.getText(new vscode.Range(start, end))
+                if (text.startsWith(closingTag.closeTagName!)) {
+                    openingTag = br
+                    break
+                }
+            }
+        }
+        if (openingTag) {
+            return [openingTag, closingTag]
         }
         return undefined
     }
@@ -110,7 +144,25 @@ export class BracketMatcher {
     }
 }
 
+let dirty = false
+let matcher: BracketMatcher | null = null
+export function initializeBrackets() {
+    vscode.window.onDidChangeActiveTextEditor(() => {
+        dirty = true
+    })
+    vscode.workspace.onDidChangeTextDocument(() => {
+        dirty = true
+    })
+}
+
 export function parseBrackets(string: string, editor: vscode.TextEditor): BracketMatcher {
+    if (dirty) {
+        dirty = false
+        matcher = null
+    }
+    if (matcher) {
+        return matcher
+    }
     const stack: Brackets[] = []
     const ret: Brackets[] = []
     let m: ReturnType<RegExp["exec"]>
@@ -252,15 +304,38 @@ export function parseBrackets(string: string, editor: vscode.TextEditor): Bracke
                 } else if (b) {
                     stack.push(b)
                 }
+            } else if (m[0] === "</") {
+                const closeTagName = string.slice(r.lastIndex, string.indexOf(">", r.lastIndex))
+                stack.push({
+                    start: r.lastIndex - 2,
+                    char: "<",
+                    closeTagName
+                })
+            } else if (m[0] === "/>") {
+                const b = stack.pop()
+                if (b && b.char === "<") {
+                    b.end = r.lastIndex
+                    ret.push(b)
+                } else if (b) {
+                    stack.push(b)
+                }
             } else if (
                 m[0] === "<" &&
-                /[a-zA-Z$_{\["]/.test(string.charAt(r.lastIndex))
+                /[a-zA-Z$_{\[">]/.test(string.charAt(r.lastIndex))
             ) {
                 stack.push({
                     start: r.lastIndex - 1,
                     char: "<",
                 })
             } else if (m[0] === ">") {
+                const matches = /[a-zA-Z$_}\]"<\/]/.test(string.charAt(r.lastIndex - 2))
+                if (!matches) {
+                    const pos = editor.document.positionAt(r.lastIndex - 1)
+                    const line = editor.document.lineAt(pos.line)
+                    if (line.firstNonWhitespaceCharacterIndex !== pos.character) {
+                        continue
+                    }
+                }
                 const b = stack.pop()
                 if (b && b.char === "<") {
                     b.end = r.lastIndex
@@ -271,5 +346,6 @@ export function parseBrackets(string: string, editor: vscode.TextEditor): Bracke
             }
         }
     }
-    return new BracketMatcher(ret, editor)
+    matcher = new BracketMatcher(ret, editor)
+    return matcher
 }
