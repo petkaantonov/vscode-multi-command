@@ -96,7 +96,7 @@ export function initializeCursorHistory() {
         const sel = event.selections[0]
         const normalizedSelection = new vscode.Selection(sel.active, sel.active)
         const data = defaultData(event.textEditor.document.uri.toString())
-        if ((now - data.lastEdited) > 300 && (now - data.lastUpdate) > 100 && (!data.previousSelection || data.previousSelection.active.compareTo(normalizedSelection.active) !== 0)) {
+        if ((now - data.lastEdited) > 300 && (now - data.lastUpdate) > 100 && (!data.previousSelection || data.previousSelection.active.line !== normalizedSelection.active.line)) {
             data.previousSelection = normalizedSelection
             data.lastUpdate = now
             save(event.textEditor.document.uri.toString())
