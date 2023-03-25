@@ -18,6 +18,7 @@ interface Brackets {
     start: number
     end?: number
     closeTagName?: string
+    openTagName?: string
 }
 type Mode =
     | "singleLineComment"
@@ -40,55 +41,27 @@ export class BracketMatcher {
     }
 
     getNextPeerBracket(cursor: vscode.Position, chars: Brackets["char"][]): Brackets | undefined {
-        const bracket = this.getBracketEnclosingCursor(cursor, chars, true)
-        if (!bracket) {
-            return this.b.find(b => chars.includes(b.char) && this.editor.document.positionAt(b.start).compareTo(cursor) > 0)
-        }
-        const next = this.b.find(b => b.char === bracket.char && b.start > bracket.end!)
-        if (!next) {
-            return this.b.find(b => b.char === bracket.char && b.start > bracket.start && this.editor.document.positionAt(b.start).compareTo(cursor) > 0)
-        }
-        return next
+        const offset = this.editor.document.offsetAt(cursor)
+        return this.b.find(b => b.start > offset && chars.includes(b.char))
     }
 
 
     getPrevPeerBracket(cursor: vscode.Position, chars: Brackets["char"][]): Brackets | undefined {
-        const bracket = this.getBracketEnclosingCursor(cursor, chars, true)
+        const offset = this.editor.document.offsetAt(cursor)
         if (!this.bb) {
             this.bb = this.b.slice().sort((a, b) => a.end! - b.end!)
         }
         const b = this.bb
-        if (!bracket) {
-            for (let i = b.length - 1; i >= 0; --i) {
-                const br = b[i]
-                if (chars.includes(br.char) && this.editor.document.positionAt(br.end!).compareTo(cursor) < 0) {
-                    return br
-                }
-            }
-            return undefined
-        }
-
         for (let i = b.length - 1; i >= 0; --i) {
             const br = b[i]
-            if (br.char === bracket.char && br.end! < bracket.start) {
+            if (br.end! <= offset && chars.includes(br.char)) {
                 return br
             }
         }
-        for (let i = b.length - 1; i >= 0; --i) {
-            const br = b[i]
-            if (br.char === bracket.char && br.start > bracket.start && this.editor.document.positionAt(br.start).compareTo(cursor) < 0) {
-                return br
-            }
-        }
-        return undefined
     }
 
     getTagEnclosingCursor(cursor: vscode.Position, tagName?: string): [Brackets, Brackets] | undefined {
         const offset = this.editor.document.offsetAt(cursor)
-        const closingTag = this.b.find(b => b.start >= offset && b.closeTagName !== undefined && (tagName !== undefined ? b.closeTagName === tagName : true))
-        if (!closingTag) {
-            return undefined
-        }
         if (!this.bb) {
             this.bb = this.b.slice().sort((a, b) => a.end! - b.end!)
         }
@@ -96,17 +69,16 @@ export class BracketMatcher {
         let openingTag: Brackets | undefined
         for (let i = b.length - 1; i >= 0; --i) {
             const br = b[i]
-            if (br.end! <= offset && br.char === "<") {
-                const start = this.editor.document.positionAt(br.start + 1)
-                const end = this.editor.document.positionAt(br.end!)
-                const text = this.editor.document.getText(new vscode.Range(start, end))
-                if (text.startsWith(closingTag.closeTagName!)) {
-                    openingTag = br
-                    break
-                }
+            if (br.start < offset && br.openTagName !== undefined) {
+                openingTag = br
+                break
             }
         }
-        if (openingTag) {
+        if (!openingTag) {
+            return undefined
+        }
+        const closingTag = this.b.find(b => b.end! > offset && b.closeTagName === openingTag!.openTagName)
+        if (openingTag && closingTag) {
             return [openingTag, closingTag]
         }
         return undefined
@@ -339,6 +311,11 @@ export function parseBrackets(string: string, editor: vscode.TextEditor): Bracke
                 const b = stack.pop()
                 if (b && b.char === "<") {
                     b.end = r.lastIndex
+                    const regex = /^<([a-zA-Z$_0-9]+)/
+                    const match = regex.exec(string.slice(b.start, b.end!))
+                    if (match) {
+                        b.openTagName = match[1]
+                    }
                     ret.push(b)
                 } else if (b) {
                     stack.push(b)

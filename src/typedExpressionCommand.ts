@@ -14,7 +14,7 @@ const pairs = {
 }
 
 class Brackets {
-    private constructor(private editor: vscode.TextEditor, private lineNumber: number, private locations: BracketLocation[], private cursor: vscode.Position, private unwrap: boolean) { }
+    private constructor(private editor: vscode.TextEditor, private lineNumber: number, private locations: BracketLocation[], private unwrap: boolean) { }
 
     static create(editor: vscode.TextEditor, cursor: vscode.Position, match: Exclude<ReturnType<RegExp["exec"]>, null>) {
         const line = match[1] ? cursor.line + parseInt(match[1] + match[2], 10) : parseInt(match[2], 10) - 1
@@ -59,7 +59,7 @@ class Brackets {
 
             }
         }
-        return new Brackets(editor, line, locations, cursor, unwrap)
+        return new Brackets(editor, line, locations, unwrap)
     }
 
     private getRanges(matcher: BracketMatcher): vscode.Range[] {
@@ -90,7 +90,7 @@ class Brackets {
     paste(matcher: BracketMatcher) {
         const ranges = this.getRanges(matcher)
         if (ranges.length > 0) {
-            return [this.cursor, ranges.map(v => this.editor.document.getText(v)).join(" ")] as [vscode.Position, string]
+            return ranges.map(v => this.editor.document.getText(v)).join(" ")
         }
     }
 
@@ -103,14 +103,14 @@ class Brackets {
 }
 
 class Lines {
-    private constructor(private editor: vscode.TextEditor, private lineNumbers: [number, number], private cursor: vscode.Position) {
-
+    private constructor(private editor: vscode.TextEditor, private lineNumbers: [number, number]) {
+  
     }
 
     static create(editor: vscode.TextEditor, cursor: vscode.Position, match: Exclude<ReturnType<RegExp["exec"]>, null>) {
         const line = match[1] ? cursor.line + parseInt(match[1] + match[2], 10) : parseInt(match[2], 10) - 1
         const toLine = match[3] === "-" ? parseInt(match[4], 10) - 1 : match[3] === "+" ? line + parseInt(match[4], 10) : line
-        return new Lines(editor, [line, toLine], cursor)
+        return new Lines(editor, [line, toLine])
     }
 
     paste() {
@@ -119,42 +119,42 @@ class Lines {
             lastLine = this.lineNumbers[1]
 
         const range = new vscode.Range(firstLine, firstCharacter, lastLine, this.editor.document.lineAt(lastLine).range.end.character)
-        return [this.cursor, this.editor.document.getText(range)] as [vscode.Position, string]
+        return this.editor.document.getText(range)
     }
 
 
 }
 
 class Tags {
-    constructor(private editor: vscode.TextEditor, private cursor: vscode.Position, private line: number, private unwrap: boolean) { }
+    constructor(private editor: vscode.TextEditor, private line: number, private unwrap: boolean) { }
 
-    paste(matcher: BracketMatcher): [vscode.Position, string] | undefined {
+    paste(matcher: BracketMatcher): string | undefined {
         const line = this.editor.document.lineAt(this.line)
 
         const tags = matcher.getTagEnclosingCursor(line.range.end)
         if (tags) {
             const start = this.unwrap ? this.editor.document.positionAt(tags[0].end!) : this.editor.document.positionAt(tags[0].start)
             const end = this.unwrap ? this.editor.document.positionAt(tags[1].start) : this.editor.document.positionAt(tags[1].end!)
-            return [this.cursor, this.editor.document.getText(new vscode.Range(start, end))]
+            return this.editor.document.getText(new vscode.Range(start, end))
         }
     }
     static create(editor: vscode.TextEditor, cursor: vscode.Position, match: Exclude<ReturnType<RegExp["exec"]>, null>) {
         const line = match[1] ? cursor.line + parseInt(match[1] + match[2], 10) : parseInt(match[2], 10) - 1
         const unwrap = match[3] === "u"
-        return new Tags(editor, cursor, line, unwrap)
+        return new Tags(editor, line, unwrap)
     }
 }
 
 class Paragraphs {
-    constructor(private editor: vscode.TextEditor, private cursor: vscode.Position, private line: number, private indentationBased: boolean) { }
+    constructor(private editor: vscode.TextEditor, private line: number, private indentationBased: boolean) { }
 
     static create(editor: vscode.TextEditor, cursor: vscode.Position, match: Exclude<ReturnType<RegExp["exec"]>, null>) {
         const line = match[1] ? cursor.line + parseInt(match[1] + match[2], 10) : parseInt(match[2], 10) - 1
         const indentationBased = match[3] === "i"
-        return new Paragraphs(editor, cursor, line, indentationBased)
+        return new Paragraphs(editor, line, indentationBased)
     }
 
-    paste(): [vscode.Position, string] | undefined {
+    paste(): string | undefined {
         let startLine = this.line
         const nonWsIndex = this.editor.document.lineAt(startLine).firstNonWhitespaceCharacterIndex
         let docLine: vscode.TextLine
@@ -174,28 +174,34 @@ class Paragraphs {
         }
         startLine++
         endLine--
-        return [this.cursor, this.editor.document.getText(new vscode.Range(startLine, 0, endLine, this.editor.document.lineAt(endLine).range.end.character))]
+        return this.editor.document.getText(new vscode.Range(startLine, 0, endLine, this.editor.document.lineAt(endLine).range.end.character))
 
     }
 }
 
 export function initializeTypedExpressionCommands() {
-    const rBrackets = /([-+]?)(\d+)((?:[rtgbs]\d*)+)(u?)$/
-    const rLines = /([-+]?)(\d+)([-+]?)(\d*)$/
-    const rTags = /([-+]?)(\d+)h(u?)$/
-    const rParagraphs = /([-+]?)(\d+)p(i?)$/
+    const rBrackets = /f?([-+]?)(\d+)((?:[rtgbs]\d*)+)(u?)$/
+    const rLines = /f?([-+]?)(\d+)([-+]?)(\d*)$/
+    const rTags = /f?([-+]?)(\d+)h(u?)$/
+    const rParagraphs = /f?([-+]?)(\d+)p(i?)$/
 
     vscode.commands.registerTextEditorCommand("extension.multiCommand.execExpressionCommand", (editor, eb, args) => {
         const toDelete: vscode.Range[] = []
         const toInsert: [vscode.Position, string][] = []
+        const primaryEditor = editor
+        const altEditor = vscode.window.visibleTextEditors.find(v => v.viewColumn === 2)
+        const altCursor = altEditor?.selection.active
         editor.selections.forEach(sel => {
             if (sel.active.compareTo(sel.anchor) !== 0) {
                 return
             }
-            const cursor = sel.active
-            const text = editor.document.lineAt(cursor.line).text.slice(0, cursor.character)
+
+            const text = primaryEditor.document.lineAt(sel.active.line).text.slice(0, sel.active.character)
             const bracketMatch = rBrackets.exec(text)
             if (bracketMatch) {
+                const useAlt = bracketMatch[0].startsWith("f")
+                const editor = useAlt ? altEditor! : primaryEditor
+                const cursor = useAlt ? altCursor! : sel.active
                 const brackets = Brackets.create(editor, cursor, bracketMatch)
                 const action = args?.action ?? "paste"
                 const matcher = parseBrackets(editor.document.getText(), editor)
@@ -203,8 +209,8 @@ export function initializeTypedExpressionCommands() {
                     case "paste": {
                         const r = brackets.paste(matcher)
                         if (r) {
-                            toInsert.push(r)
-                            toDelete.push(new vscode.Range(cursor.line, cursor.character - bracketMatch[0].length, cursor.line, cursor.character))
+                            toInsert.push([sel.active, r])
+                            toDelete.push(new vscode.Range(sel.active.line, sel.active.character - bracketMatch[0].length, sel.active.line, sel.active.character))
                         }
                         break
                     }
@@ -212,7 +218,7 @@ export function initializeTypedExpressionCommands() {
                         const r = brackets.delete(matcher)
                         if (r) {
                             toDelete.push(...r)
-                            toDelete.push(new vscode.Range(cursor.line, cursor.character - bracketMatch[0].length, cursor.line, cursor.character))
+                            toDelete.push(new vscode.Range(sel.active.line, sel.active.character - bracketMatch[0].length, sel.active.line, sel.active.character))
                         }
                         break
                     }
@@ -220,39 +226,49 @@ export function initializeTypedExpressionCommands() {
                 return
             } else {
                 const linesMatch = rLines.exec(text)
+
                 if (linesMatch) {
+                    const useAlt = linesMatch[0].startsWith("f")
+                    const editor = useAlt ? altEditor! : primaryEditor
+                    const cursor = useAlt ? altCursor! : sel.active
                     const lines = Lines.create(editor, cursor, linesMatch)
                     const action = args?.action ?? "paste"
                     if (action === "paste") {
                         const l = lines.paste()
                         if (l) {
-                            toInsert.push(l)
-                            toDelete.push(new vscode.Range(cursor.line, cursor.character - linesMatch[0].length, cursor.line, cursor.character))
+                            toInsert.push([sel.active, l])
+                            toDelete.push(new vscode.Range(sel.active.line, sel.active.character - linesMatch[0].length, sel.active.line, sel.active.character))
                         }
                     }
                 } else {
                     const tagMatch = rTags.exec(text)
                     if (tagMatch) {
+                        const useAlt = tagMatch[0].startsWith("f")
+                        const editor = useAlt ? altEditor! : primaryEditor
+                        const cursor = useAlt ? altCursor! : sel.active
                         const tags = Tags.create(editor, cursor, tagMatch)
                         const action = args?.action ?? "paste"
                         const matcher = parseBrackets(editor.document.getText(), editor)
                         if (action === "paste") {
                             const t = tags.paste(matcher)
                             if (t) {
-                                toInsert.push(t)
-                                toDelete.push(new vscode.Range(cursor.line, cursor.character - tagMatch[0].length, cursor.line, cursor.character))
+                                toInsert.push([sel.active, t])
+                                toDelete.push(new vscode.Range(sel.active.line, sel.active.character - tagMatch[0].length, sel.active.line, sel.active.character))
                             }
                         }
                     } else {
                         const paragraphMatch = rParagraphs.exec(text)
                         if (paragraphMatch) {
+                            const useAlt = paragraphMatch[0].startsWith("f")
+                            const editor = useAlt ? altEditor! : primaryEditor
+                            const cursor = useAlt ? altCursor! : sel.active
                             const paragraphs = Paragraphs.create(editor, cursor, paragraphMatch)
                             const action = args?.action ?? "paste"
                             if (action === "paste") {
                                 const p = paragraphs.paste()
                                 if (p) {
-                                    toInsert.push(p)
-                                    toDelete.push(new vscode.Range(cursor.line, cursor.character - paragraphMatch[0].length, cursor.line, cursor.character))
+                                    toInsert.push([sel.active, p])
+                                    toDelete.push(new vscode.Range(sel.active.line, sel.active.character - paragraphMatch[0].length, sel.active.line, sel.active.character))
                                 }
                             }
                         }

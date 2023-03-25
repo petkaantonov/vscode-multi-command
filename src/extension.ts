@@ -331,6 +331,52 @@ export function activate(context: vscode.ExtensionContext) {
 
     })
 
+    vscode.commands.registerTextEditorCommand("extension.multiCommand.selectTags", (editor, eb, args) => {
+        const includeTags = !!args.includeTags
+        const b = parseBrackets(editor.document.getText(), editor)
+        const newSelections: vscode.Selection[] = []
+
+        editor.selections.forEach(sel => {
+            const tag = b.getTagEnclosingCursor(sel.active)
+            if (tag) {
+                const [startingTag, endingTag] = tag
+                const start = editor.document.positionAt(includeTags ? startingTag.start : startingTag.end!)
+                const end = editor.document.positionAt(includeTags ? endingTag.end! : endingTag.start)
+                const s = new vscode.Selection(start.line, start.character, end.line, end.character)
+                newSelections.push(includeTags ? s : trimSelection(s, editor))
+            }
+        })
+        const text = newSelections.map(v => editor.document.getText(v)).join("\n")
+        if (text) {
+            varContext.saveSelectSlot(text)
+        }
+        if (newSelections.length > 0) {
+            editor.selections = newSelections
+        }
+    })
+
+    vscode.commands.registerTextEditorCommand("extension.multiCommand.deleteTags", (editor, eb, args) => {
+        const includeTags = !!args.includeTags
+        const b = parseBrackets(editor.document.getText(), editor)
+        const newSelections: vscode.Selection[] = []
+
+        editor.selections.forEach(sel => {
+            const tag = b.getTagEnclosingCursor(sel.active)
+            if (tag) {
+                const [startingTag, endingTag] = tag
+                const start = editor.document.positionAt(includeTags ? startingTag.start : startingTag.end!)
+                const end = editor.document.positionAt(includeTags ? endingTag.end! : endingTag.start)
+                const s = new vscode.Selection(start.line, start.character, end.line, end.character)
+                newSelections.push(includeTags ? s : trimSelection(s, editor))
+            }
+        })
+        const text = newSelections.map(v => editor.document.getText(v)).join("\n")
+        if (text) {
+            varContext.saveDeleteSlot(text)
+        }
+        newSelections.forEach(s => eb.delete(s))
+    })
+
     vscode.commands.registerTextEditorCommand("extension.multiCommand.selectBrackets", (editor, eb, args) => {
         const includeBrackets = !!args.includeBrackets
         const chars = args?.chars || "{[(<".split("")
@@ -376,6 +422,33 @@ export function activate(context: vscode.ExtensionContext) {
         newSelections.forEach(s => eb.delete(s))
     })
 
+    vscode.commands.registerCommand("extension.multiCommand.insertLine", async (args) => {
+        const direction = args?.direction === "up" ? "up" : "down"
+        const editor = vscode.window.activeTextEditor!
+        const ops: { text: string, insertPos: vscode.Position, newSel: vscode.Selection }[] = []
+        editor.selections.forEach(sel => {
+            if (sel.active.compareTo(sel.anchor) === 0) {
+                const prevLine = Math.max(0, sel.active.line - 1)
+                const line = editor.document.lineAt(sel.active.line)
+                const pos = direction === "down" ? new vscode.Position(sel.active.line, line.range.end.character) : new vscode.Position(prevLine, editor.document.lineAt(prevLine).range.end.character)
+                const text = "\n" + editor.document.getText(new vscode.Range(sel.active.line, 0, sel.active.line, line.firstNonWhitespaceCharacterIndex))
+                const newSelRelative = direction === "down" ? 1 : 0
+                const newSel = new vscode.Selection(sel.active.line + newSelRelative, line.firstNonWhitespaceCharacterIndex, sel.active.line + newSelRelative, line.firstNonWhitespaceCharacterIndex)
+                ops.push({
+                    text,
+                    insertPos: pos,
+                    newSel
+                })
+            }
+        })
+        if (ops.length > 0) {
+            await editor.edit(eb => {
+                ops.forEach(({ text, insertPos }) => eb.insert(insertPos, text))
+            })
+            editor.selections = ops.map(v => v.newSel)
+        }
+    })
+
     vscode.commands.registerTextEditorCommand("extension.multiCommand.gotoPeerBracket", (editor, eb, args) => {
         const direction = args?.direction === "prev" ? "prev" : "next"
         const chars = args?.chars || ["{"]
@@ -385,13 +458,37 @@ export function activate(context: vscode.ExtensionContext) {
         const b = parseBrackets(editor.document.getText(), editor)
         const bracket = direction === "prev" ? b.getPrevPeerBracket(editor.selection.active, chars) : b.getNextPeerBracket(editor.selection.active, chars)
         if (bracket) {
-            const start = editor.document.positionAt(bracket.start + 1)
+            const isBlock = bracket.char === "{"
+            let start = editor.document.positionAt(bracket.start + 1)
+            if (isBlock) {
+                const end = editor.document.positionAt(bracket.end!)
+
+                if (direction === "next") {
+                    let line = start.line + 1
+                    while (line < end.line) {
+                        if (!editor.document.lineAt(line).isEmptyOrWhitespace) {
+                            start = new vscode.Position(line, editor.document.lineAt(line).firstNonWhitespaceCharacterIndex)
+                            break
+                        }
+                        line++
+                    }
+                } else {
+                    let line = end.line - 1
+                    while (line > start.line) {
+                        if (!editor.document.lineAt(line).isEmptyOrWhitespace) {
+                            start = new vscode.Position(line, editor.document.lineAt(line).firstNonWhitespaceCharacterIndex)
+                            break
+                        }
+                        line--
+                    }
+                }
+            }
             editor.selection = new vscode.Selection(start.line, start.character, start.line, start.character)
             editor.revealRange(editor.selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport)
         }
     })
 
-    
+
 
     vscode.commands.registerTextEditorCommand("extension.multiCommand.jumpOutOfBrackets", (editor, eb, args) => {
         const b = parseBrackets(editor.document.getText(), editor)
